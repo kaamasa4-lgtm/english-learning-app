@@ -18,14 +18,14 @@
 Windowsマイク ➡️ WSL2     音声のWAV変換 ➡️ タイムスタンプ抽出   Ollamaへのメタデータ注入 ＆ 評価     MeloTTSによる返答の音声化 ＆ グラフ表示
 ```
 
-* フェーズ 1：最小限の通信疎通（プロトタイプ構築）
-* Windows（フロント）でマイク録音し、WSL2（バックエンド）のFastAPIへデータをPOST送信できる状態を最優先で確立します（CORSとマイク問題をここでクリア）。
-* フェーズ 2：音声認識（耳）の組み込み
-* WSL2側に `faster-whisper` を導入。受信した音声（WebM等）をFFmpegでWAV（16kHz/モノラル）に変換し、単語ごとのタイムスタンプ（`start`、`end`）と信頼度（`avg_logprob`）を正しくJSON化します。
-* フェーズ 3：ローカルLLM（脳）との連動
-* Ollamaを立ち上げ、Whisperが吐き出した「文字起こし文＋タイムスタンプや信頼度のメタデータ」をプロンプトに注入。ユーザーへの的確な英語指導レポートを日本語で生成させます。
-* フェーズ 4：UIの高度化と音声合成（口）の追加
-* フロントエンドのグラフ表示（DTWによるズレの可視化）の実装、および `MeloTTS` 等を用いた「AI教師の返答音声化」を実装し、完全な対話ループを完成させます。
+* **フェーズ 1：最小限の通信疎通（プロトタイプ構築）**
+  * Windows（フロント）でマイク録音し、WSL2（バックエンド）のFastAPIへデータをPOST送信できる状態を最優先で確立します（CORSとマイク問題をここでクリア）。
+* **フェーズ 2：音声認識（耳）の組み込み**
+  * WSL2側に `faster-whisper` を導入。受信した音声（WebM等）をFFmpegでWAV（16kHz/モノラル）に変換し、単語ごとのタイムスタンプ（`start`、`end`）と信頼度（`avg_logprob`）を正しくJSON化します。
+* **フェーズ 3：ローカルLLM（脳）との連動**
+  * Ollamaを立ち上げ、Whisperが吐き出した「文字起こし文＋タイムスタンプや信頼度のメタデータ」をプロンプトに注入。ユーザーへの的確な英語指導レポートを日本語で生成させます。
+* **フェーズ 4：UIの高度化と音声合成（口）の追加**
+  * フロントエンドのグラフ表示（DTWによるズレの可視化）の実装、および `MeloTTS` 等を用いた「AI教師の返答音声化」を実装し、完全な対話ループを完成させます。
 
 ## 🛠️ 3. システム構成図
 
@@ -95,6 +95,7 @@ graph TD
     %% クラスの適用
     class Windows11 win;
     class WSL2 wsl;
+```
 
 ## 📁 4. ディレクトリ構造
 
@@ -107,22 +108,24 @@ english-learning-app/
 ├── README.md                # 本ドキュメント
 │
 ├── frontend/                # 【Windows側（ブラウザ）で動作・表示】
+│   ├── README.md            # フロントエンド向けドキュメント
 │   ├── index.html           # 録音・結果表示を行うメインUI
 │   └── js/
 │       └── app.js           # 録音制御、FastAPIへのFetch通信ロジック
 │
 └── backend/                 # 【WSL2 / Ubuntu（GPU）側で実行】
-├── main.py              # FastAPIのエントリーポイント（CORS設定、ルーティング）
-├── requirements.txt     # Python依存ライブラリ一覧
-│
-├── services/            # 各AI機能のモジュール化
-│   ├── stt_service.py   # faster-whisperによる文字起こし・メタデータ抽出
-│   ├── llm_service.py   # Ollama API（ユーザーへのアドバイス生成）
-│   └── tts_service.py   # MeloTTS等による音声合成
-│
-└── storage/             # ← .gitignore でGit管理から除外
-├── raw_audio/       # フロントから届いた一時音声（webmなど）
-└── processed_wav/   # Whisper用に16kHzに変換したWAV、およびTTS生成音声
+    ├── README.md            # バックエンド向けドキュメント
+    ├── main.py              # FastAPIのエントリーポイント（CORS設定、ルーティング）
+    ├── requirements.txt     # Python依存ライブラリ一覧
+    │
+    ├── services/            # 各AI機能のモジュール化
+    │   ├── stt_service.py   # faster-whisperによる文字起こし・メタデータ抽出
+    │   ├── llm_service.py   # Ollama API（ユーザーへのアドバイス生成）
+    │   └── tts_service.py   # MeloTTS等による音声合成
+    │
+    └── storage/             # ← .gitignore でGit管理から除外
+        ├── raw_audio/       # フロントから届いた一時音声（webmなど）
+        └── processed_wav/   # Whisper用に16kHzに変換したWAV、およびTTS生成音声
 ```
 
 ### 必須設定: `.gitignore`
@@ -130,7 +133,7 @@ english-learning-app/
 
 ```text
 .venv/
-pycache/
+__pycache__/
 *.webm
 *.wav
 *.mp3
@@ -161,23 +164,17 @@ backend/storage/
 
 ### フロントエンド（Windowsブラウザ）の責務
 
-ユーザー操作: 「録音開始」ボタンでマイク権限を要求し、`MediaRecorder` で音声チャンク（`Blob`）をメモリに蓄積。
-
-データ送信: 「録音停止」で録音を終了し、データを `audio/webm` バイナリとして `FormData` にパッケージング。`fetch('http://localhost:8000/upload-audio')` でWSL2のFastAPIへPOST送信。
-
-結果レンダリング: FastAPIから戻ってきた判定JSON（スコア、LLMのアドバイステキスト、グラフ用配列データ）を元にUIを動的更新。
+* **ユーザー操作:** 「録音開始」ボタンでマイク権限を要求し、`MediaRecorder` で音声チャンク（`Blob`）をメモリに蓄積。
+* **データ送信:** 「録音停止」で録音を終了し、データを `audio/webm` バイナリとして `FormData` にパッケージング。`fetch('http://localhost:8000/upload-audio')` でWSL2のFastAPIへPOST送信。
+* **結果レンダリング:** FastAPIから戻ってきた判定JSON（スコア、LLMのアドバイステキスト、グラフ用配列データ）を元にUIを動的更新。
 
 ### バックエンド（WSL2 / FastAPI）の責務
 
-CORSの突破: Windowsのブラウザ（別オリジン）からのリクエストを拒否しないよう、`CORSMiddleware` を設定。
-
-音声ファイルの標準化: 届いたデータを一度保存し、内部で `ffmpeg` を呼び出して `16kHz / 16bit / モノラル` のWAVファイルへ確実に変換。
-
-耳（STT）の駆動: `faster-whisper` にWAVを通し、単語ごとの「テキスト」「開始時間」「終了時間」「平均対数確率（avg_logprob）」を抽出。
-
-脳（LLM）の駆動: 抽出したデータを元に、「何秒言い淀んだか」「どこが発音不良か」のメタデータを算出し、Ollamaに対して構造化したJSONプロンプトを組み立てて送信。
-
-レスポンス: LLMが生成した人間味のあるフィードバック文と、評価数値を合算してフロントエンドにクリーンなJSONとして返却。
+* **CORSの突破:** Windowsのブラウザ（別オリジン）からのリクエストを拒否しないよう、`CORSMiddleware` を設定。
+* **音声ファイルの標準化:** 届いたデータを一度保存し、内部で `ffmpeg` を呼び出して `16kHz / 16bit / モノラル` のWAVファイルへ確実に変換。
+* **耳（STT）の駆動:** `faster-whisper` にWAVを通し、単語ごとの「テキスト」「開始時間」「終了時間」「平均対数確率（avg_logprob）」を抽出。
+* **脳（LLM）の駆動:** 抽出したデータを元に、「何秒言い淀んだか」「どこが発音不良か」のメタデータを算出し、Ollamaに対して構造化したJSONプロンプトを組み立てて送信。
+* **レスポンス:** LLMが生成した人間味のあるフィードバック文と、評価数値を合算してフロントエンドにクリーンなJSONとして返却。
 
 ## 📈 7. 【拡張機能提案】ユーザー専用の「弱点カルテ」
 アプリの価値をさらに高めるため、以下の機能をフェーズ4以降に導入することを推奨します。
