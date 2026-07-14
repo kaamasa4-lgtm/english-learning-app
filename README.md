@@ -58,6 +58,44 @@ Windowsマイク ➡️ WSL2     音声のWAV変換 ➡️ タイムスタンプ
 +------------------------------------+       +------------------------------------------------------+
 ```
 
+```mermaid
+graph TD
+    %% スタイルの定義
+    classDef win fill:#e1f5fe,stroke:#03a9f4,stroke-width:2px;
+    classDef wsl fill:#efebe9,stroke:#795548,stroke-width:2px;
+    classDef ai fill:#fff3e0,stroke:#ff9800,stroke-width:2px;
+
+    %% Windows側の構成
+    subgraph Windows11 [Windows 11 側 : フロントエンド]
+        UI[ブラウザ UI<br>・課題提示<br>・グラフ表示]:::win
+        Microphone[Web Audio API<br>・マイク録音]:::win
+    end
+
+    %% WSL2側の構成
+    subgraph WSL2 [WSL2 / Ubuntu 側 : バックエンド]
+        FastAPI[FastAPI サーバー<br>localhost:8000]:::wsl
+        FFmpeg[FFmpeg<br>16kHz WAV変換]:::wsl
+
+        subgraph AI_Engines [ローカルAIエンジン群]
+            STT[耳: faster-whisper<br>単語ごとのタイムスタンプ抽出]:::ai
+            LLM[脳: Ollama / Qwen2.5-Coder<br>発音・指導アドバイス生成]:::ai
+            TTS[口: MeloTTS<br>AI教師の返答音声化]:::ai
+        end
+    end
+
+    %% データの流れの定義
+    Microphone -->|① 音声データ送信<br>WebM / WAV| FastAPI
+    FastAPI -->|② 変換処理| FFmpeg
+    FFmpeg -->|③ WAVデータ渡し| STT
+    STT -->|④ テキスト化 ＆ メタデータ| LLM
+    LLM -->|⑤ レポート文生成| TTS
+    LLM -->|⑥ 解析結果 JSON| UI
+    TTS -->|⑦ お手本・返答音声| UI
+
+    %% クラスの適用
+    class Windows11 win;
+    class WSL2 wsl;
+
 ## 📁 4. ディレクトリ構造
 
 WSL2環境側でGitを初期化（`git init`）し、プロジェクトを一括管理します。Windows側からはVS Codeの「WSL拡張機能」を使ってこのフォルダを開き、コーディングを行います。
