@@ -81,6 +81,7 @@ body {
   font-weight: 700;
   letter-spacing: -0.025em;
   background: linear-gradient(to right, #818cf8, #c084fc);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -142,7 +143,7 @@ body {
 .timer-display {
   font-size: 1.5rem;
   font-weight: 600;
-  font-mono: monospace;
+  font-family: monospace;
   margin-top: 1rem;
   color: var(--text-secondary);
 }
