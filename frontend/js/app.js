@@ -28,27 +28,26 @@ async function checkServerConnection() {
     if (response.ok) {
       const data = await response.json();
       if (data.status === 'ok') {
-        setConnectionStatus(true);
+        setConnectionStatus(true, `接続中 (${data.device.toUpperCase()} / ${data.model})`);
         return;
       }
     }
-    setConnectionStatus(false);
+    setConnectionStatus(false, 'サーバー未接続');
   } catch (error) {
-    console.warn('Backend connection check failed:', error);
-    setConnectionStatus(false);
+    setConnectionStatus(false, 'サーバー未接続');
   }
 }
 
 /**
  * 接続状態のUIを切り替える
  */
-function setConnectionStatus(isConnected) {
+function setConnectionStatus(isConnected, message = '') {
   if (isConnected) {
     statusBadge.className = 'status-badge connected';
-    statusText.textContent = 'サーバー接続済み';
+    statusText.textContent = message || 'サーバー接続済み';
   } else {
     statusBadge.className = 'status-badge disconnected';
-    statusText.textContent = 'サーバー未接続';
+    statusText.textContent = message || 'サーバー未接続';
   }
 }
 
@@ -70,39 +69,27 @@ async function startRecording() {
   audioChunks = [];
   
   try {
-    // マイクのアクセス権限を取得
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     
-    // サポートされている録音形式を確認し、優先的にwebmを指定
     let options = { mimeType: 'audio/webm' };
     if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-      console.log(`${options.mimeType} is not supported. Using default browser audio format.`);
-      options = {}; // デフォルトの形式を使用
+      options = {}; // ブラウザのデフォルト形式
     }
 
     mediaRecorder = new MediaRecorder(stream, options);
     
-    // 録音データのチャンクが利用可能になった時のイベントハンドラ
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
         audioChunks.push(event.data);
       }
     };
 
-    // 録音停止時のイベントハンドラ
     mediaRecorder.onstop = async () => {
-      // マイクのトラックをすべて停止してインジケータを消す
       stream.getTracks().forEach(track => track.stop());
-      
-      // 録音データをBlob化
       const audioBlob = new Blob(audioChunks, { type: options.mimeType || 'audio/webm' });
-      console.log('Audio blob created. Size:', audioBlob.size, 'MIME:', audioBlob.type);
-      
-      // バックエンドへ送信
       await uploadAudio(audioBlob);
     };
 
-    // 録音開始
     mediaRecorder.start();
     isRecording = true;
     startTime = Date.now();
@@ -113,11 +100,8 @@ async function startRecording() {
     stopIcon.style.display = 'block';
     timerDisplay.classList.add('active');
     
-    // タイマーの始動
     timerDisplay.textContent = '00:00';
     timerInterval = setInterval(updateTimer, 1000);
-    
-    console.log('Recording started');
 
   } catch (error) {
     console.error('Error starting recording:', error);
@@ -135,30 +119,40 @@ function stopRecording() {
   mediaRecorder.stop();
   isRecording = false;
   
-  // UIの更新
   recordBtn.classList.remove('recording');
   micIcon.style.display = 'block';
   stopIcon.style.display = 'none';
   timerDisplay.classList.remove('active');
   
-  // タイマーのクリア
   clearInterval(timerInterval);
   timerInterval = null;
-  
-  console.log('Recording stopped');
 }
 
 /**
- * 録音データをバックエンドへ送信
+ * 簡易Markdownパーサー (LLMからのレスポンス整形用)
+ */
+function parseMarkdown(text) {
+  if (!text) return '';
+  return text
+    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/^\- (.*$)/gim, '<li>$1</li>')
+    .replace(/\n\n/g, '<br><br>')
+    .replace(/\n/g, '<br>');
+}
+
+/**
+ * 録音データをバックエンドへ送信 & 結果描画
  */
 async function uploadAudio(audioBlob) {
   loader.style.display = 'flex';
   responseContainer.innerHTML = '';
-  responseMeta.textContent = '送信中...';
+  responseMeta.textContent = '音声解析 & AIコーチ思考中...';
 
-  // FormDataオブジェクトの作成
   const formData = new FormData();
-  // 拡張子つきのファイル名でBlobをアタッチする
   formData.append('audio', audioBlob, 'recording.webm');
 
   const uploadStart = Date.now();
@@ -177,45 +171,75 @@ async function uploadAudio(audioBlob) {
     }
 
     const result = await response.json();
-    console.log('Server response:', result);
 
-    // UIへ結果を出力
-    responseMeta.textContent = `${elapsedMs}ms | ステータス: OK`;
+    // メタ情報の更新
+    responseMeta.textContent = `処理時間: ${(elapsedMs / 1000).toFixed(1)}s | ファイル: ${(result.size_bytes / 1024).toFixed(1)} KB`;
     
-    // プレミアムなカードUIで表示
-    responseContainer.innerHTML = `
-      <div class="result-card">
-        <div class="result-row">
-          <span class="result-label">メッセージ</span>
-          <span class="result-value success">${result.message}</span>
-        </div>
-        <div class="result-row">
-          <span class="result-label">保存ファイル名</span>
-          <span class="result-value">${result.filename}</span>
-        </div>
-        <div class="result-row">
-          <span class="result-label">ファイルサイズ</span>
-          <span class="result-value">${(result.size_bytes / 1024).toFixed(2)} KB</span>
-        </div>
+    // 1. 文字起こし文の表示
+    const transcriptHtml = `
+      <div class="transcript-text">
+        <strong>🎙️ 文字起こし結果:</strong><br>
+        "${result.transcript || '<span style="color: var(--text-secondary); font-style: italic;">音声が認識されませんでした。</span>'}"
       </div>
     `;
 
-    // サーバーとの接続状態も再確認して更新
-    setConnectionStatus(true);
+    // 2. 単語ごとのタイムラインバッジ作成
+    let timelineHtml = '<div class="timeline-container">';
+    if (result.words && result.words.length > 0) {
+      result.words.forEach(word => {
+        let scoreClass = 'score-high';
+        let scorePct = Math.round(word.avg_logprob * 100);
+        
+        if (word.avg_logprob < 0.6) {
+          scoreClass = 'score-low';
+        } else if (word.avg_logprob < 0.85) {
+          scoreClass = 'score-medium';
+        }
+        
+        timelineHtml += `
+          <div class="word-badge">
+            <span class="word-text">${word.text}</span>
+            <span class="word-time">${word.start.toFixed(1)}s - ${word.end.toFixed(1)}s</span>
+            <span class="word-score ${scoreClass}">${scorePct}%</span>
+          </div>
+        `;
+      });
+    } else {
+      timelineHtml += '<p style="color: var(--text-secondary); width: 100%; text-align: center;">単語ごとの時間情報はありません。</p>';
+    }
+    timelineHtml += '</div>';
+
+    // 3. AIコーチからのアドバイスカード作成
+    let feedbackHtml = '';
+    if (result.feedback) {
+      feedbackHtml = `
+        <div style="margin-top: 1.5rem; padding: 1.25rem; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; line-height: 1.6;">
+          <h3 style="margin-top: 0; color: #60a5fa; display: flex; align-items: center; gap: 0.5rem;">
+            🤖 AIコーチからの発音アドバイス
+          </h3>
+          <div style="font-size: 0.95rem; color: #e2e8f0;">
+            ${parseMarkdown(result.feedback)}
+          </div>
+        </div>
+      `;
+    }
+
+    // 表示エリアへ結合して描画
+    responseContainer.innerHTML = transcriptHtml + timelineHtml + feedbackHtml;
 
   } catch (error) {
     console.error('Error uploading audio:', error);
     responseMeta.textContent = 'エラー';
     responseContainer.innerHTML = `
-      <div style="color: #ef4444; font-family: inherit;">
-        <strong>送信に失敗しました:</strong><br>
-        ${error.message}<br><br>
-        <span style="font-size: 0.8rem; color: var(--text-secondary);">
-          ・WSL2側でサーバーが起動しているか確認してください。<br>
-          ・ブラウザとサーバーのCORS設定が一致しているか確認してください。
-        </span>
-      </div>
-    `;
+   <div style="color: #ef4444;">
+     <strong>⚠️ 送信に失敗しました:</strong><br>
+     ${error.message}<br><br>
+     <span style="font-size: 0.8rem; color: var(--text-secondary);">
+       ・WSL2側で 'ollama serve' および FastAPI が動作しているか確認してください。<br>
+       ・Qwen2.5 / Llama3 などのモデルが 'ollama pull' 済みか確認してください。
+     </span>
+   </div>
+ `;
   } finally {
     loader.style.display = 'none';
   }
@@ -233,7 +257,5 @@ recordBtn.addEventListener('click', () => {
 // 初期ロード時にサーバーの接続状態をチェック
 document.addEventListener('DOMContentLoaded', () => {
   checkServerConnection();
-  
-  // 定期的に接続を確認する (5秒おき)
   setInterval(checkServerConnection, 5000);
 });

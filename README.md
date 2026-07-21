@@ -181,3 +181,10 @@ backend/storage/
 
 * 概要: 毎回「1回きりの採点」で終わらせず、過去のデータをローカルの軽量なデータベース（SQLiteやJSONログ、またはVector DBの `Chroma`）に蓄積。
 * 効果: ローカルLLMを動かす際、「このユーザーは過去に `th` と `rl` の発音で5回以上つまづいています」という履歴情報をプロンプトに一緒に引き渡します（RAGの要領）。これにより、LLMが「また `world` でつまずいてしまいましたね。でも前回より言い淀み時間は0.5秒短縮されていますよ！」といった、ユーザーの過去の成長を追える、世界で唯一の完全パーソナライズ化されたAI英語教師へと進化させることが可能です。
+
+cd backend
+source .venv/bin/activate
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+cd frontend
+python -m http.server 5500
