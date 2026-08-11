@@ -3,26 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI English Coach</title>
+  <title>英語発音練習</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-  <!-- ステータスバッジ -->
   <div class="top-bar">
     <div id="statusBadge" class="status-badge disconnected">
-      <span class="status-dot"></span>
       <span id="statusText">サーバー未接続</span>
     </div>
   </div>
 
   <main class="app-container">
     <header class="app-header">
-      <h1>AI English Coach</h1>
-      <p class="subtitle">Whisper × Qwen2.5 英語発音・スピーキング解析</p>
+      <h1>英語発音練習</h1>
+      <p class="subtitle">録音して発音を確認します</p>
     </header>
 
-    <!-- 録音コントロール -->
     <section class="recording-card">
       <button id="recordBtn" class="record-btn" aria-label="録音開始/停止">
         <svg id="micIcon" class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -35,29 +32,27 @@
       </button>
 
       <div id="timer" class="timer-display">00:00</div>
-      <p class="instruction">マイクボタンを押して発音を開始・停止してください</p>
+      <p class="instruction">ボタンを押して録音開始・停止</p>
     </section>
 
-    <!-- ローダー -->
     <div id="loader" class="loader-container" style="display: none;">
       <div class="spinner"></div>
-      <p>音声解析 & AIコーチ思考中...</p>
+      <p>解析中...</p>
     </div>
 
-    <!-- 解析結果エリア -->
     <section class="results-card">
       <div class="results-header">
-        <h2>解析・フィードバック結果</h2>
+        <h2>結果</h2>
         <span id="responseMeta" class="response-meta"></span>
       </div>
-      
+
       <div id="responseContainer" class="response-container">
-        <p class="empty-state">録音を完了すると、ここに文字起こしとアドバイスが表示されます。</p>
+        <p class="empty-state">録音すると結果がここに表示されます。</p>
       </div>
     </section>
 
     <footer class="app-footer">
-      English Learning App © 2026. Powered by WSL2 + Ollama + FastAPI
+      English Learning App
     </footer>
   </main>
 

@@ -4,8 +4,10 @@ import tempfile
 import logging
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from services.stt_service import STTService
 from services.llm_service import LLMService
+from services.tts_service import TTSService, PROCESSED_WAV_DIR
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +32,11 @@ app.add_middleware(
 # サービスのインスタンス化
 stt_service = STTService()
 llm_service = LLMService()
+tts_service = TTSService()
+
+# TTS 生成音声の静的配信
+os.makedirs(PROCESSED_WAV_DIR, exist_ok=True)
+app.mount("/storage/processed_wav", StaticFiles(directory=PROCESSED_WAV_DIR), name="processed_wav")
 
 
 @app.get("/")
@@ -44,7 +51,8 @@ async def health_check():
     return {
         "status": "ok",
         "device": stt_service.device,
-        "model": llm_service.model_name
+        "model": llm_service.model_name,
+        "tts_available": tts_service.is_available,
     }
 
 
@@ -55,7 +63,8 @@ async def upload_audio(audio: UploadFile = File(...)):
     1. 一時ファイルとしてローカルに保存
     2. STT (faster-whisper) による文字起こし & 単語レベルタイムスタンプ抽出
     3. LLM (Ollama) による日本語発音アドバイスの生成
-    4. 一時ファイルの削除
+    4. TTS (MeloTTS) によるフィードバック音声化（未インストール時はスキップ）
+    5. 一時ファイルの削除
     """
     if not audio.filename:
         raise HTTPException(status_code=400, detail="ファイル名が無効です。")
@@ -84,14 +93,22 @@ async def upload_audio(audio: UploadFile = File(...)):
         )
         logger.info("LLMフィードバック生成完了")
 
-        # 3. レスポンス返却
+        # 3. TTS によるフィードバック音声化（MeloTTS 未インストール時はスキップ）
+        audio_filename = tts_service.synthesize_feedback(feedback_text)
+        audio_url = f"/storage/processed_wav/{audio_filename}" if audio_filename else None
+        if audio_filename:
+            logger.info(f"TTS音声生成完了: {audio_filename}")
+
+        # 4. レスポンス返却
         return {
             "status": "success",
             "filename": audio.filename,
             "size_bytes": file_size,
             "transcript": stt_result["transcript"],
             "words": stt_result["words"],
-            "feedback": feedback_text
+            "feedback": feedback_text,
+            "converted_wav": stt_result.get("converted_wav"),
+            "audio_url": audio_url,
         }
 
     except Exception as e:

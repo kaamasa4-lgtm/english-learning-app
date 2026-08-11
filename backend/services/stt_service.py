@@ -5,6 +5,13 @@ from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
+PROCESSED_WAV_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "storage",
+    "processed_wav",
+)
+
+
 class STTService:
     def __init__(self, model_size: str = "base"):
         self.model_size = model_size
@@ -68,58 +75,52 @@ class STTService:
         """
         音声ファイルをWAVに変換してから文字起こしを実行し、結果を返します。
         """
-        # 一時WAVファイルパスの生成
-        wav_path = os.path.splitext(file_path)[0] + "_converted.wav"
-        
-        try:
-            # 1. WAV変換
-            self.convert_audio_to_wav(file_path, wav_path)
-            
-            # 2. 文字起こし
-            logger.info(f"Starting transcription for {wav_path}...")
-            model = self.get_whisper_model()
-            
-            segments, info = model.transcribe(wav_path, word_timestamps=True, language="en")
-            
-            words_data = []
-            full_transcript_parts = []
-            
-            for segment in segments:
-                full_transcript_parts.append(segment.text)
-                
-                if segment.words:
-                    for word in segment.words:
+        os.makedirs(PROCESSED_WAV_DIR, exist_ok=True)
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        wav_filename = f"{base_name}_converted.wav"
+        wav_path = os.path.join(PROCESSED_WAV_DIR, wav_filename)
+
+        # 1. WAV変換（16kHz / モノラル → processed_wav/ に保存）
+        self.convert_audio_to_wav(file_path, wav_path)
+
+        # 2. 文字起こし
+        logger.info(f"Starting transcription for {wav_path}...")
+        model = self.get_whisper_model()
+
+        segments, info = model.transcribe(wav_path, word_timestamps=True, language="en")
+
+        words_data = []
+        full_transcript_parts = []
+
+        for segment in segments:
+            full_transcript_parts.append(segment.text)
+
+            if segment.words:
+                for word in segment.words:
+                    words_data.append({
+                        "text": word.word.strip(),
+                        "start": round(word.start, 2),
+                        "end": round(word.end, 2),
+                        "avg_logprob": round(word.probability, 4)
+                    })
+            else:
+                words = segment.text.strip().split()
+                if words:
+                    duration = segment.end - segment.start
+                    word_duration = duration / len(words)
+                    for i, w in enumerate(words):
                         words_data.append({
-                            "text": word.word.strip(),
-                            "start": round(word.start, 2),
-                            "end": round(word.end, 2),
-                            "avg_logprob": round(word.probability, 4)
+                            "text": w,
+                            "start": round(segment.start + i * word_duration, 2),
+                            "end": round(segment.start + (i + 1) * word_duration, 2),
+                            "avg_logprob": 0.5
                         })
-                else:
-                    words = segment.text.strip().split()
-                    if words:
-                        duration = segment.end - segment.start
-                        word_duration = duration / len(words)
-                        for i, w in enumerate(words):
-                            words_data.append({
-                                "text": w,
-                                "start": round(segment.start + i * word_duration, 2),
-                                "end": round(segment.start + (i + 1) * word_duration, 2),
-                                "avg_logprob": 0.5
-                            })
-                            
-            full_transcript = " ".join(full_transcript_parts).strip()
-            logger.info(f"Transcription completed. Text: {full_transcript}")
-            
-            return {
-                "transcript": full_transcript,
-                "words": words_data
-            }
-            
-        finally:
-            # 一時WAVファイルの削除
-            if os.path.exists(wav_path):
-                try:
-                    os.remove(wav_path)
-                except Exception:
-                    pass
+
+        full_transcript = " ".join(full_transcript_parts).strip()
+        logger.info(f"Transcription completed. Text: {full_transcript}")
+
+        return {
+            "transcript": full_transcript,
+            "words": words_data,
+            "converted_wav": wav_filename,
+        }

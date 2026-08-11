@@ -28,7 +28,8 @@ async function checkServerConnection() {
     if (response.ok) {
       const data = await response.json();
       if (data.status === 'ok') {
-        setConnectionStatus(true, `接続中 (${data.device.toUpperCase()} / ${data.model})`);
+        const ttsLabel = data.tts_available ? 'TTS: 有' : 'TTS: 無';
+        setConnectionStatus(true, `接続中 / ${data.model} / ${ttsLabel}`);
         return;
       }
     }
@@ -150,7 +151,7 @@ function parseMarkdown(text) {
 async function uploadAudio(audioBlob) {
   loader.style.display = 'flex';
   responseContainer.innerHTML = '';
-  responseMeta.textContent = '音声解析 & AIコーチ思考中...';
+  responseMeta.textContent = '解析中...';
 
   const formData = new FormData();
   formData.append('audio', audioBlob, 'recording.webm');
@@ -177,69 +178,68 @@ async function uploadAudio(audioBlob) {
     
     // 1. 文字起こし文の表示
     const transcriptHtml = `
-      <div class="transcript-text">
-        <strong>🎙️ 文字起こし結果:</strong><br>
-        "${result.transcript || '<span style="color: var(--text-secondary); font-style: italic;">音声が認識されませんでした。</span>'}"
+      <div class="section-block">
+        <div class="section-title">文字起こし</div>
+        <div class="transcript-text">
+          ${result.transcript || '<span class="empty-state">音声が認識されませんでした。</span>'}
+        </div>
       </div>
     `;
 
     // 2. 単語ごとのタイムラインバッジ作成
-    let timelineHtml = '<div class="timeline-container">';
+    let timelineHtml = '<div class="section-block"><div class="section-title">単語ごとの解析</div><div class="timeline-container">';
     if (result.words && result.words.length > 0) {
       result.words.forEach(word => {
-        let scoreClass = 'score-high';
-        let scorePct = Math.round(word.avg_logprob * 100);
-        
-        if (word.avg_logprob < 0.6) {
-          scoreClass = 'score-low';
-        } else if (word.avg_logprob < 0.85) {
-          scoreClass = 'score-medium';
-        }
-        
+        const scorePct = Math.round(word.avg_logprob * 100);
         timelineHtml += `
           <div class="word-badge">
             <span class="word-text">${word.text}</span>
             <span class="word-time">${word.start.toFixed(1)}s - ${word.end.toFixed(1)}s</span>
-            <span class="word-score ${scoreClass}">${scorePct}%</span>
+            <span class="word-score">${scorePct}%</span>
           </div>
         `;
       });
     } else {
-      timelineHtml += '<p style="color: var(--text-secondary); width: 100%; text-align: center;">単語ごとの時間情報はありません。</p>';
+      timelineHtml += '<p class="empty-state">単語ごとの情報はありません。</p>';
     }
-    timelineHtml += '</div>';
+    timelineHtml += '</div></div>';
 
     // 3. AIコーチからのアドバイスカード作成
     let feedbackHtml = '';
     if (result.feedback) {
       feedbackHtml = `
-        <div style="margin-top: 1.5rem; padding: 1.25rem; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; line-height: 1.6;">
-          <h3 style="margin-top: 0; color: #60a5fa; display: flex; align-items: center; gap: 0.5rem;">
-            🤖 AIコーチからの発音アドバイス
-          </h3>
-          <div style="font-size: 0.95rem; color: #e2e8f0;">
-            ${parseMarkdown(result.feedback)}
-          </div>
+        <div class="section-block feedback-block">
+          <h3>アドバイス</h3>
+          <div>${parseMarkdown(result.feedback)}</div>
+        </div>
+      `;
+    }
+
+    let audioHtml = '';
+    if (result.audio_url) {
+      audioHtml = `
+        <div class="section-block audio-block">
+          <h3>音声フィードバック</h3>
+          <audio controls src="${BACKEND_URL}${result.audio_url}"></audio>
         </div>
       `;
     }
 
     // 表示エリアへ結合して描画
-    responseContainer.innerHTML = transcriptHtml + timelineHtml + feedbackHtml;
+    responseContainer.innerHTML = transcriptHtml + timelineHtml + feedbackHtml + audioHtml;
 
   } catch (error) {
     console.error('Error uploading audio:', error);
     responseMeta.textContent = 'エラー';
     responseContainer.innerHTML = `
-   <div style="color: #ef4444;">
-     <strong>⚠️ 送信に失敗しました:</strong><br>
-     ${error.message}<br><br>
-     <span style="font-size: 0.8rem; color: var(--text-secondary);">
-       ・WSL2側で 'ollama serve' および FastAPI が動作しているか確認してください。<br>
-       ・Qwen2.5 / Llama3 などのモデルが 'ollama pull' 済みか確認してください。
-     </span>
-   </div>
- `;
+      <div class="error-block">
+        <strong>送信に失敗しました</strong><br>
+        ${error.message}
+        <div class="error-hint">
+          バックエンド（FastAPI）と Ollama が起動しているか確認してください。
+        </div>
+      </div>
+    `;
   } finally {
     loader.style.display = 'none';
   }

@@ -110,6 +110,8 @@ english-learning-app/
 ├── frontend/                # 【Windows側（ブラウザ）で動作・表示】
 │   ├── README.md            # フロントエンド向けドキュメント
 │   ├── index.html           # 録音・結果表示を行うメインUI
+│   ├── css/
+│   │   └── style.css        # UIスタイル
 │   └── js/
 │       └── app.js           # 録音制御、FastAPIへのFetch通信ロジック
 │
@@ -117,7 +119,8 @@ english-learning-app/
     ├── README.md            # バックエンド向けドキュメント
     ├── main.py              # FastAPIのエントリーポイント（CORS設定、ルーティング）
     ├── requirements.txt     # Python依存ライブラリ一覧
-    │
+    ├── scripts/
+    │   └── verify.sh        # 全コンポーネントの動作確認スクリプト
     ├── services/            # 各AI機能のモジュール化
     │   ├── stt_service.py   # faster-whisperによる文字起こし・メタデータ抽出
     │   ├── llm_service.py   # Ollama API（ユーザーへのアドバイス生成）
@@ -174,17 +177,129 @@ backend/storage/
 * **音声ファイルの標準化:** 届いたデータを一度保存し、内部で `ffmpeg` を呼び出して `16kHz / 16bit / モノラル` のWAVファイルへ確実に変換。
 * **耳（STT）の駆動:** `faster-whisper` にWAVを通し、単語ごとの「テキスト」「開始時間」「終了時間」「平均対数確率（avg_logprob）」を抽出。
 * **脳（LLM）の駆動:** 抽出したデータを元に、「何秒言い淀んだか」「どこが発音不良か」のメタデータを算出し、Ollamaに対して構造化したJSONプロンプトを組み立てて送信。
-* **レスポンス:** LLMが生成した人間味のあるフィードバック文と、評価数値を合算してフロントエンドにクリーンなJSONとして返却。
+* **レスポンス:** LLMが生成した人間味のあるフィードバック文と、MeloTTS による音声 URL（`audio_url`）を JSON で返却。
 
-## 📈 7. 【拡張機能提案】ユーザー専用の「弱点カルテ」
+## ✅ 8. 現在の実装状況
+
+| フェーズ | 機能 | 状態 |
+|---------|------|------|
+| Phase 1 | FastAPI 起動 / CORS / 音声アップロード | ✅ 実装済み |
+| Phase 2 | faster-whisper STT / WAV 変換 / 単語タイムスタンプ | ✅ 実装済み |
+| Phase 3 | Ollama LLM フィードバック生成 | ✅ 実装済み |
+| Phase 4 | MeloTTS 音声合成 / 音声再生 UI | ✅ 実装済み（必須） |
+| Phase 4 | DTW グラフ可視化 | ⬜ 未実装 |
+
+## 🛠️ 9. 初回セットアップ（WSL2 / Ubuntu）
+
+### システムパッケージ
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-full python3-pip ffmpeg git \
+  mecab libmecab-dev mecab-ipadic-utf8
+```
+
+> **重要（Ubuntu 24.04 / PEP 668）:** システムの `pip install` は `externally-managed-environment` エラーになります。**必ず仮想環境（`.venv`）を作成してから** パッケージをインストールしてください。`pip install --break-system-packages` は使わないでください。
+
+### Ollama（LLM）
+
+```bash
+# インストール後、推奨モデルを取得
+ollama pull qwen2.5:3b
+# 別ターミナルで常時起動
+ollama serve
+```
+
+### バックエンド（STT + LLM + TTS）
+
+```bash
+cd backend
+source .venv/bin/activate      # プロンプトに (.venv) が付くことを確認
+pip install -r requirements.txt   # MeloTTS 含む（初回または依存追加時）
+python -m unidic download         # 日本語 TTS に必要
+
+mkdir -p storage/raw_audio storage/processed_wav
+```
+
+`.venv` がまだない場合のみ: `python3 -m venv .venv` を先に実行してください。
+
+> **MeloTTS について:** PyPI にはないため `requirements.txt` から GitHub リポジトリを直接インストールします。上記の MeCab 系パッケージがないとビルドに失敗します。
+
+## 🚀 10. 起動方法
+
+### バックエンドの起動（WSL2）
+
+```bash
+cd backend
+source .venv/bin/activate
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### フロントエンドの起動（Windows または WSL2）
+
+```bash
+cd frontend
+python -m http.server 5500
+```
+
+ブラウザで `http://localhost:5500` を開き、マイクボタンから録音→停止すると解析結果が表示されます。
+
+### 動作確認
+
+WSL2 で以下を実行すると、環境・API・STT・LLM・TTS を一括チェックできます。
+
+```bash
+cd backend
+bash scripts/verify.sh
+```
+
+結果は `VERIFICATION_RESULTS.txt` に保存されます。`FAIL` が 0 なら正常です。
+
+手動確認:
+
+```bash
+curl http://localhost:8000/health
+# => {"status":"ok","device":"cuda","model":"qwen2.5:3b","tts":"melotts"}
+
+curl -F "audio=@storage/raw_audio/received_recording.webm" http://localhost:8000/upload-audio
+```
+
+### API レスポンス例（現在の実装）
+
+```json
+{
+  "status": "success",
+  "filename": "recording.webm",
+  "size_bytes": 48231,
+  "transcript": "Hello, how are you today?",
+  "words": [
+    { "text": "Hello", "start": 0.12, "end": 0.45, "avg_logprob": 0.92 }
+  ],
+  "feedback": "全体的にクリアな発音です。...",
+  "converted_wav": "tmpXXXX_converted.wav",
+  "audio_url": "/storage/processed_wav/feedback_abc123.wav"
+}
+```
+
+`audio_url` は常に返されます。音声は `http://localhost:8000` + `audio_url` で再生できます。
+
+## 📈 11. 【拡張機能提案】ユーザー専用の「弱点カルテ」
 アプリの価値をさらに高めるため、以下の機能をフェーズ4以降に導入することを推奨します。
 
 * 概要: 毎回「1回きりの採点」で終わらせず、過去のデータをローカルの軽量なデータベース（SQLiteやJSONログ、またはVector DBの `Chroma`）に蓄積。
 * 効果: ローカルLLMを動かす際、「このユーザーは過去に `th` と `rl` の発音で5回以上つまづいています」という履歴情報をプロンプトに一緒に引き渡します（RAGの要領）。これにより、LLMが「また `world` でつまずいてしまいましたね。でも前回より言い淀み時間は0.5秒短縮されていますよ！」といった、ユーザーの過去の成長を追える、世界で唯一の完全パーソナライズ化されたAI英語教師へと進化させることが可能です。
 
-cd backend
-source .venv/bin/activate
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+## 🔧 12. トラブルシューティング
 
-cd frontend
-python -m http.server 5500
+| 症状 | 対処 |
+|------|------|
+| `externally-managed-environment` | 仮想環境を有効化してから pip: `source .venv/bin/activate` |
+| `localhost:8000` に届かない | WSL2 で uvicorn が起動しているか確認。`--host 0.0.0.0` を指定 |
+| CORS エラー | フロントは `http://localhost:5500` で開く（`file://` は非推奨） |
+| マイクが使えない | ブラウザのサイト権限でマイクを許可 |
+| FFmpeg エラー | `sudo apt install ffmpeg` |
+| Ollama 接続失敗 | 別ターミナルで `ollama serve` を起動。`ollama pull qwen2.5:3b` |
+| MeloTTS インストール失敗 | `sudo apt install mecab libmecab-dev mecab-ipadic-utf8 git` 後に `pip install -r requirements.txt` |
+| TTS / MeCab エラー | `python -m unidic download` を実行 |
+| Whisper が遅い | `stt_service.py` のモデルサイズを `small` 等に変更 |
+| GPU が使われない | `nvidia-smi` で WSL2 から GPU が見えるか確認 |

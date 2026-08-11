@@ -4,3 +4,4 @@ python-multipart
 pydub
 ffmpeg-python
 faster-whisper
+httpx
